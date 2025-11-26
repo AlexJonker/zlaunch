@@ -45,6 +45,12 @@ pub struct LauncherTheme {
     pub section_header_color: Hsla,
     pub section_header_margin_top: Pixels,
     pub section_header_margin_bottom: Pixels,
+
+    // Emoji grid
+    pub emoji_columns: usize,
+    pub emoji_cell_size: Pixels,
+    pub emoji_font_size: Pixels,
+    pub emoji_cell_selected_bg: Hsla,
 }
 
 impl Default for LauncherTheme {
@@ -92,6 +98,12 @@ impl Default for LauncherTheme {
             section_header_color: hsla(0.0, 0.0, 1.0, 0.4), // 40% white (like descriptions)
             section_header_margin_top: px(8.0),
             section_header_margin_bottom: px(4.0),
+
+            // Emoji grid (8 columns, ~64px cells to fit in 600px window with margins)
+            emoji_columns: 8,
+            emoji_cell_size: px(64.0),
+            emoji_font_size: px(28.0),
+            emoji_cell_selected_bg: hsla(0.0, 0.0, 1.0, 0.1), // 10% white
         }
     }
 }

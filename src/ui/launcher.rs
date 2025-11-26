@@ -2,11 +2,12 @@ use crate::calculator::copy_to_clipboard;
 use crate::compositor::Compositor;
 use crate::desktop::launch_application;
 use crate::items::ListItem;
+use crate::ui::emoji::EmojiGridDelegate;
 use crate::ui::items::ItemListDelegate;
 use crate::ui::theme::theme;
 use gpui::{
-    App, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollStrategy, Task,
-    WeakEntity, Window, actions, div, image_cache, prelude::*, retain_all,
+    AnyElement, App, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, ScrollStrategy,
+    Task, WeakEntity, Window, actions, div, image_cache, prelude::*, retain_all,
 };
 use gpui_component::IndexPath;
 use gpui_component::input::{Input, InputState};
@@ -14,19 +15,48 @@ use gpui_component::list::{List, ListState};
 use gpui_component::{ActiveTheme, Icon, IconName};
 use std::sync::Arc;
 
-actions!(launcher, [SelectNext, SelectPrev, Confirm, Cancel]);
+actions!(
+    launcher,
+    [
+        SelectNext,
+        SelectPrev,
+        SelectTab,
+        SelectTabPrev,
+        Confirm,
+        Cancel,
+        GoBack
+    ]
+);
+
+/// The current view mode of the launcher.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    /// Main launcher view showing apps, windows, commands.
+    #[default]
+    Main,
+    /// Emoji picker grid view.
+    EmojiPicker,
+}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrev, Some("LauncherView")),
         KeyBinding::new("down", SelectNext, Some("LauncherView")),
+        KeyBinding::new("tab", SelectTab, Some("LauncherView")),
+        KeyBinding::new("shift-tab", SelectTabPrev, Some("LauncherView")),
         KeyBinding::new("enter", Confirm, Some("LauncherView")),
         KeyBinding::new("escape", Cancel, Some("LauncherView")),
+        KeyBinding::new("backspace", GoBack, Some("LauncherView")),
     ]);
 }
 
 pub struct LauncherView {
+    /// Current view mode (main or emoji picker).
+    view_mode: ViewMode,
+    /// Main list state.
     list_state: Entity<ListState<ItemListDelegate>>,
+    /// Emoji grid state (created on demand).
+    emoji_list_state: Option<Entity<ListState<EmojiGridDelegate>>>,
     input_state: Entity<InputState>,
     focus_handle: FocusHandle,
     #[allow(dead_code)] // Kept alive for blur handler
@@ -108,7 +138,9 @@ impl LauncherView {
         .detach();
 
         Self {
+            view_mode: ViewMode::Main,
             list_state,
+            emoji_list_state: None,
             input_state,
             focus_handle,
             on_hide,
@@ -129,6 +161,73 @@ impl LauncherView {
         self.input_state.update(cx, |input, cx| {
             input.set_value("", window, cx);
         });
+    }
+
+    /// Enter emoji picker mode.
+    fn enter_emoji_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Clear search input and update placeholder
+        self.input_state.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_placeholder("Search emojis...", window, cx);
+        });
+
+        // Create emoji delegate
+        let on_hide = self.on_hide.clone();
+        let mut delegate = EmojiGridDelegate::new();
+
+        delegate.set_on_select(move |emoji| {
+            if let Err(e) = copy_to_clipboard(&emoji.emoji) {
+                tracing::warn!(%e, "Failed to copy emoji to clipboard");
+            }
+            on_hide();
+        });
+
+        let emoji_list_state = cx.new(|cx| ListState::new(delegate, window, cx));
+
+        // Subscribe to input changes for emoji filtering
+        let emoji_state_for_search = emoji_list_state.clone();
+        cx.subscribe(&self.input_state, move |_this, input, event, cx| {
+            if let gpui_component::input::InputEvent::Change = event {
+                let query = input.read(cx).value().to_string();
+                emoji_state_for_search.update(cx, |list_state, cx| {
+                    list_state.delegate_mut().set_query(query);
+                    list_state.delegate_mut().filter();
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        self.emoji_list_state = Some(emoji_list_state);
+        self.view_mode = ViewMode::EmojiPicker;
+        cx.notify();
+    }
+
+    /// Exit emoji picker mode and return to main view.
+    fn exit_emoji_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.view_mode = ViewMode::Main;
+        self.emoji_list_state = None;
+
+        // Clear search, reset placeholder, and reset main list
+        self.input_state.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_placeholder("Search applications...", window, cx);
+        });
+        self.list_state.update(cx, |list_state, _cx| {
+            list_state.delegate_mut().clear_query();
+        });
+        cx.notify();
+    }
+
+    /// Handle back action (backspace or back button).
+    fn go_back(&mut self, _: &GoBack, window: &mut Window, cx: &mut Context<Self>) {
+        if self.view_mode == ViewMode::EmojiPicker {
+            // Check if input is empty before going back
+            let is_empty = self.input_state.read(cx).value().is_empty();
+            if is_empty {
+                self.exit_emoji_mode(window, cx);
+            }
+        }
     }
 
     fn async_search(
@@ -167,57 +266,214 @@ impl LauncherView {
     }
 
     fn select_next(&mut self, _: &SelectNext, window: &mut Window, cx: &mut Context<Self>) {
-        self.list_state.update(cx, |list_state, cx| {
-            let delegate = list_state.delegate_mut();
-            let count = delegate.filtered_count();
-            if count == 0 {
-                return;
+        match self.view_mode {
+            ViewMode::Main => {
+                self.list_state.update(cx, |list_state, cx| {
+                    let delegate = list_state.delegate_mut();
+                    let count = delegate.filtered_count();
+                    if count == 0 {
+                        return;
+                    }
+                    let current = delegate.selected_index().unwrap_or(0);
+                    let next = if current + 1 >= count { 0 } else { current + 1 };
+                    delegate.set_selected(next);
+                    let (section, row) = delegate.global_to_section_row(next);
+                    list_state.scroll_to_item(
+                        IndexPath::new(row).section(section),
+                        ScrollStrategy::Top,
+                        window,
+                        cx,
+                    );
+                    cx.notify();
+                });
             }
-            let current = delegate.selected_index().unwrap_or(0);
-            let next = if current + 1 >= count { 0 } else { current + 1 };
-            delegate.set_selected(next);
-            let (section, row) = delegate.global_to_section_row(next);
-            list_state.scroll_to_item(
-                IndexPath::new(row).section(section),
-                ScrollStrategy::Top,
-                window,
-                cx,
-            );
-            cx.notify();
-        });
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    emoji_state.update(cx, |list_state, cx| {
+                        let delegate = list_state.delegate_mut();
+                        delegate.select_right(); // Linear navigation in grid
+                        if let Some(row) = delegate.selected_row() {
+                            list_state.scroll_to_item(
+                                IndexPath::new(row),
+                                ScrollStrategy::Top,
+                                window,
+                                cx,
+                            );
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        }
     }
 
     fn select_prev(&mut self, _: &SelectPrev, window: &mut Window, cx: &mut Context<Self>) {
-        self.list_state.update(cx, |list_state, cx| {
-            let delegate = list_state.delegate_mut();
-            let count = delegate.filtered_count();
-            if count == 0 {
-                return;
+        match self.view_mode {
+            ViewMode::Main => {
+                self.list_state.update(cx, |list_state, cx| {
+                    let delegate = list_state.delegate_mut();
+                    let count = delegate.filtered_count();
+                    if count == 0 {
+                        return;
+                    }
+                    let current = delegate.selected_index().unwrap_or(0);
+                    let prev = if current == 0 { count - 1 } else { current - 1 };
+                    delegate.set_selected(prev);
+                    let (section, row) = delegate.global_to_section_row(prev);
+                    list_state.scroll_to_item(
+                        IndexPath::new(row).section(section),
+                        ScrollStrategy::Top,
+                        window,
+                        cx,
+                    );
+                    cx.notify();
+                });
             }
-            let current = delegate.selected_index().unwrap_or(0);
-            let prev = if current == 0 { count - 1 } else { current - 1 };
-            delegate.set_selected(prev);
-            let (section, row) = delegate.global_to_section_row(prev);
-            list_state.scroll_to_item(
-                IndexPath::new(row).section(section),
-                ScrollStrategy::Top,
-                window,
-                cx,
-            );
-            cx.notify();
-        });
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    emoji_state.update(cx, |list_state, cx| {
+                        let delegate = list_state.delegate_mut();
+                        delegate.select_left(); // Linear navigation in grid
+                        if let Some(row) = delegate.selected_row() {
+                            list_state.scroll_to_item(
+                                IndexPath::new(row),
+                                ScrollStrategy::Top,
+                                window,
+                                cx,
+                            );
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        }
     }
 
-    fn confirm(&mut self, _: &Confirm, _window: &mut Window, cx: &mut Context<Self>) {
-        self.list_state.update(cx, |list_state, _cx| {
-            list_state.delegate_mut().do_confirm();
-        });
+    /// Tab moves to next item linearly (for both main view and emoji grid).
+    fn select_tab(&mut self, _: &SelectTab, window: &mut Window, cx: &mut Context<Self>) {
+        match self.view_mode {
+            ViewMode::Main => {
+                self.list_state.update(cx, |list_state, cx| {
+                    let delegate = list_state.delegate_mut();
+                    let count = delegate.filtered_count();
+                    if count == 0 {
+                        return;
+                    }
+                    let current = delegate.selected_index().unwrap_or(0);
+                    let next = if current + 1 >= count { 0 } else { current + 1 };
+                    delegate.set_selected(next);
+                    let (section, row) = delegate.global_to_section_row(next);
+                    list_state.scroll_to_item(
+                        IndexPath::new(row).section(section),
+                        ScrollStrategy::Top,
+                        window,
+                        cx,
+                    );
+                    cx.notify();
+                });
+            }
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    emoji_state.update(cx, |list_state, cx| {
+                        let delegate = list_state.delegate_mut();
+                        delegate.select_right(); // Move to next item linearly
+                        if let Some(row) = delegate.selected_row() {
+                            list_state.scroll_to_item(
+                                IndexPath::new(row),
+                                ScrollStrategy::Top,
+                                window,
+                                cx,
+                            );
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        }
     }
 
-    fn cancel(&mut self, _: &Cancel, _window: &mut Window, cx: &mut Context<Self>) {
-        self.list_state.update(cx, |list_state, _cx| {
-            list_state.delegate_mut().do_cancel();
-        });
+    /// Shift+Tab moves to previous item linearly.
+    fn select_tab_prev(&mut self, _: &SelectTabPrev, window: &mut Window, cx: &mut Context<Self>) {
+        match self.view_mode {
+            ViewMode::Main => {
+                self.list_state.update(cx, |list_state, cx| {
+                    let delegate = list_state.delegate_mut();
+                    let count = delegate.filtered_count();
+                    if count == 0 {
+                        return;
+                    }
+                    let current = delegate.selected_index().unwrap_or(0);
+                    let prev = if current == 0 { count - 1 } else { current - 1 };
+                    delegate.set_selected(prev);
+                    let (section, row) = delegate.global_to_section_row(prev);
+                    list_state.scroll_to_item(
+                        IndexPath::new(row).section(section),
+                        ScrollStrategy::Top,
+                        window,
+                        cx,
+                    );
+                    cx.notify();
+                });
+            }
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    emoji_state.update(cx, |list_state, cx| {
+                        let delegate = list_state.delegate_mut();
+                        delegate.select_left(); // Move to previous item linearly
+                        if let Some(row) = delegate.selected_row() {
+                            list_state.scroll_to_item(
+                                IndexPath::new(row),
+                                ScrollStrategy::Top,
+                                window,
+                                cx,
+                            );
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        }
+    }
+
+    fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        match self.view_mode {
+            ViewMode::Main => {
+                // Check if selected item is the Emojis submenu
+                let selected_item = self.list_state.read(cx).delegate().selected_item();
+
+                if let Some(ListItem::Submenu(ref submenu)) = selected_item {
+                    if submenu.id == "submenu-emojis" {
+                        self.enter_emoji_mode(window, cx);
+                        return;
+                    }
+                }
+
+                // Default confirm for other items
+                self.list_state.update(cx, |list_state, _cx| {
+                    list_state.delegate_mut().do_confirm();
+                });
+            }
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    emoji_state.update(cx, |list_state, _cx| {
+                        list_state.delegate_mut().do_confirm();
+                    });
+                }
+            }
+        }
+    }
+
+    fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        match self.view_mode {
+            ViewMode::Main => {
+                self.list_state.update(cx, |list_state, _cx| {
+                    list_state.delegate_mut().do_cancel();
+                });
+            }
+            ViewMode::EmojiPicker => {
+                self.exit_emoji_mode(window, cx);
+            }
+        }
     }
 }
 
@@ -231,6 +487,45 @@ impl gpui::Render for LauncherView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme();
 
+        // Build input prefix based on view mode
+        let input_prefix: AnyElement = match self.view_mode {
+            ViewMode::Main => Icon::new(IconName::Search)
+                .text_color(cx.theme().muted_foreground)
+                .mr_2()
+                .into_any_element(),
+            ViewMode::EmojiPicker => div()
+                .id("back-button")
+                .cursor_pointer()
+                .mr_2()
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.exit_emoji_mode(window, cx);
+                }))
+                .child(Icon::new(IconName::ArrowLeft).text_color(cx.theme().muted_foreground))
+                .into_any_element(),
+        };
+
+        // Build list content based on view mode
+        let list_content: AnyElement = match self.view_mode {
+            ViewMode::Main => image_cache(retain_all("app-icons"))
+                .flex_1()
+                .overflow_hidden()
+                .py_2()
+                .child(List::new(&self.list_state))
+                .into_any_element(),
+            ViewMode::EmojiPicker => {
+                if let Some(ref emoji_state) = self.emoji_list_state {
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .py_2()
+                        .child(List::new(emoji_state))
+                        .into_any_element()
+                } else {
+                    div().flex_1().into_any_element()
+                }
+            }
+        };
+
         // Fullscreen backdrop - clicking it closes the launcher
         let on_hide = self.on_hide.clone();
         div()
@@ -239,8 +534,11 @@ impl gpui::Render for LauncherView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_tab))
+            .on_action(cx.listener(Self::select_tab_prev))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::go_back))
             .size_full()
             .flex()
             .items_center()
@@ -278,21 +576,11 @@ impl gpui::Render for LauncherView {
                                 Input::new(&self.input_state)
                                     .appearance(false)
                                     .cleanable(true)
-                                    .prefix(
-                                        Icon::new(IconName::Search)
-                                            .text_color(cx.theme().muted_foreground)
-                                            .mr_2(),
-                                    ),
+                                    .prefix(input_prefix),
                             ),
                     )
-                    // List section with image caching
-                    .child(
-                        image_cache(retain_all("app-icons"))
-                            .flex_1()
-                            .overflow_hidden()
-                            .py_2()
-                            .child(List::new(&self.list_state)),
-                    ),
+                    // List section
+                    .child(list_content),
             )
     }
 }

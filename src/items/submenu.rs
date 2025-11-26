@@ -75,4 +75,16 @@ impl SubmenuItem {
             layout: SubmenuLayout::Custom(layout_name.into()),
         }
     }
+
+    /// Builder method to set a description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Builder method to set an icon name.
+    pub fn with_icon(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
+        self
+    }
 }

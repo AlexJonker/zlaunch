@@ -1,5 +1,5 @@
 use crate::calculator::{evaluate_expression, looks_like_expression};
-use crate::items::{CalculatorItem, ListItem};
+use crate::items::{CalculatorItem, ListItem, SubmenuItem};
 use crate::ui::items::render_item;
 use crate::ui::theme::theme;
 use fuzzy_matcher::FuzzyMatcher;
@@ -14,8 +14,19 @@ use std::sync::Arc;
 pub struct SectionInfo {
     /// Number of windows in filtered results
     pub window_count: usize,
+    /// Number of commands (submenus) in filtered results
+    pub command_count: usize,
     /// Number of applications in filtered results
     pub app_count: usize,
+}
+
+/// Types of sections in the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SectionType {
+    Calculator,
+    Windows,
+    Commands,
+    Applications,
 }
 
 /// A generic delegate for displaying and filtering list items.
@@ -32,7 +43,14 @@ pub struct ItemListDelegate {
 }
 
 impl ItemListDelegate {
-    pub fn new(items: Vec<ListItem>) -> Self {
+    pub fn new(mut items: Vec<ListItem>) -> Self {
+        // Add built-in submenu items
+        items.push(ListItem::Submenu(
+            SubmenuItem::grid("submenu-emojis", "Emojis", 8)
+                .with_description("Search and copy emojis")
+                .with_icon("smile"),
+        ));
+
         let len = items.len();
         let filtered_indices: Vec<usize> = (0..len).collect();
         let section_info = Self::compute_section_info(&items, &filtered_indices);
@@ -57,6 +75,8 @@ impl ItemListDelegate {
             if let Some(item) = items.get(item_idx) {
                 if item.is_window() {
                     info.window_count += 1;
+                } else if item.is_submenu() {
+                    info.command_count += 1;
                 } else if item.is_application() {
                     info.app_count += 1;
                 }
@@ -172,82 +192,48 @@ impl ItemListDelegate {
         }
     }
 
-    /// Get item at a specific section and row index.
-    /// When calculator is present, section 0 is the calculator, other sections are offset.
-    fn get_item_at_section(&self, section: usize, row: usize) -> Option<ListItem> {
-        let has_calc = self.calculator_item.is_some();
-
-        // If calculator present and section 0, return calculator
-        if has_calc && section == 0 {
-            return self.calculator_item.clone().map(ListItem::Calculator);
-        }
-
-        // Adjust section index if calculator is present
-        let adjusted_section = if has_calc { section - 1 } else { section };
-
-        let has_windows = self.section_info.window_count > 0;
-
-        let filtered_row = if has_windows {
-            if adjusted_section == 0 {
-                row // Windows section
-            } else {
-                self.section_info.window_count + row // Applications section
-            }
-        } else {
-            row // Only applications
-        };
-
-        self.filtered_indices
-            .get(filtered_row)
-            .and_then(|&idx| self.items.get(idx))
-            .cloned()
-    }
-
     /// Convert section + row to global selected index.
     fn section_row_to_global(&self, section: usize, row: usize) -> usize {
-        let has_calc = self.calculator_item.is_some();
-
-        // If calculator present and section 0, global index is 0
-        if has_calc && section == 0 {
-            return row; // Should always be 0 for calculator section
-        }
-
-        let calc_offset = if has_calc { 1 } else { 0 };
-        let adjusted_section = if has_calc { section - 1 } else { section };
-
-        let has_windows = self.section_info.window_count > 0;
-        let base = if has_windows && adjusted_section == 1 {
-            self.section_info.window_count + row
-        } else {
-            row
-        };
-
-        base + calc_offset
+        let section_type = self.section_type_at(section);
+        self.section_start_index(section_type) + row
     }
 
     /// Convert global index to section + row.
     pub fn global_to_section_row(&self, global: usize) -> (usize, usize) {
         let has_calc = self.calculator_item.is_some();
+        let has_windows = self.section_info.window_count > 0;
+        let has_commands = self.section_info.command_count > 0;
+
+        let calc_offset = if has_calc { 1 } else { 0 };
+        let window_end = calc_offset + self.section_info.window_count;
+        let command_end = window_end + self.section_info.command_count;
+
+        // Determine which section and compute the row within it
+        let mut section_idx = 0;
 
         if has_calc {
             if global == 0 {
-                return (0, 0); // Calculator section
+                return (0, 0);
             }
-            let adjusted_global = global - 1;
-            let has_windows = self.section_info.window_count > 0;
-            if has_windows && adjusted_global >= self.section_info.window_count {
-                (2, adjusted_global - self.section_info.window_count)
-            } else {
-                (1, adjusted_global)
-            }
-        } else {
-            let has_windows = self.section_info.window_count > 0;
-            if has_windows && global >= self.section_info.window_count {
-                (1, global - self.section_info.window_count)
-            } else {
-                (0, global)
-            }
+            section_idx += 1;
         }
+
+        if has_windows {
+            if global < window_end {
+                return (section_idx, global - calc_offset);
+            }
+            section_idx += 1;
+        }
+
+        if has_commands {
+            if global < command_end {
+                return (section_idx, global - window_end);
+            }
+            section_idx += 1;
+        }
+
+        // Must be in Applications section
+        (section_idx, global - command_end)
     }
 
     pub fn clear_query(&mut self) {
@@ -298,6 +284,59 @@ impl ItemListDelegate {
             on_cancel();
         }
     }
+
+    /// Get the currently selected item, if any.
+    pub fn selected_item(&self) -> Option<ListItem> {
+        self.selected_index.and_then(|idx| self.get_item_at(idx))
+    }
+
+    /// Determine what type of section is at the given section index.
+    fn section_type_at(&self, section: usize) -> SectionType {
+        let has_calc = self.calculator_item.is_some();
+        let has_windows = self.section_info.window_count > 0;
+        let has_commands = self.section_info.command_count > 0;
+
+        let mut current_section = 0;
+
+        if has_calc {
+            if section == current_section {
+                return SectionType::Calculator;
+            }
+            current_section += 1;
+        }
+
+        if has_windows {
+            if section == current_section {
+                return SectionType::Windows;
+            }
+            current_section += 1;
+        }
+
+        if has_commands {
+            if section == current_section {
+                return SectionType::Commands;
+            }
+            // current_section += 1; // Not needed, Applications is the default
+        }
+
+        // Default to Applications
+        SectionType::Applications
+    }
+
+    /// Get the starting filtered index for a given section type.
+    fn section_start_index(&self, section_type: SectionType) -> usize {
+        let has_calc = self.calculator_item.is_some();
+        let calc_offset = if has_calc { 1 } else { 0 };
+
+        match section_type {
+            SectionType::Calculator => 0,
+            SectionType::Windows => calc_offset,
+            SectionType::Commands => calc_offset + self.section_info.window_count,
+            SectionType::Applications => {
+                calc_offset + self.section_info.window_count + self.section_info.command_count
+            }
+        }
+    }
 }
 
 impl ListDelegate for ItemListDelegate {
@@ -306,42 +345,32 @@ impl ListDelegate for ItemListDelegate {
     fn sections_count(&self, _cx: &App) -> usize {
         let has_calc = self.calculator_item.is_some();
         let has_windows = self.section_info.window_count > 0;
+        let has_commands = self.section_info.command_count > 0;
         let has_apps = self.section_info.app_count > 0;
 
-        let base_sections = match (has_windows, has_apps) {
-            (true, true) => 2,   // Windows + Applications
-            (true, false) => 1,  // Only Windows
-            (false, true) => 1,  // Only Applications
-            (false, false) => 0, // Empty
-        };
-
-        // Add 1 for calculator section if present
+        let mut count = 0;
         if has_calc {
-            base_sections + 1
-        } else {
-            base_sections
+            count += 1;
         }
+        if has_windows {
+            count += 1;
+        }
+        if has_commands {
+            count += 1;
+        }
+        if has_apps {
+            count += 1;
+        }
+        count
     }
 
     fn items_count(&self, section: usize, _cx: &App) -> usize {
-        let has_calc = self.calculator_item.is_some();
-
-        // Calculator section always has 1 item
-        if has_calc && section == 0 {
-            return 1;
-        }
-
-        let adjusted_section = if has_calc { section - 1 } else { section };
-        let has_windows = self.section_info.window_count > 0;
-
-        if has_windows {
-            if adjusted_section == 0 {
-                self.section_info.window_count
-            } else {
-                self.section_info.app_count
-            }
-        } else {
-            self.section_info.app_count
+        let section_type = self.section_type_at(section);
+        match section_type {
+            SectionType::Calculator => 1,
+            SectionType::Windows => self.section_info.window_count,
+            SectionType::Commands => self.section_info.command_count,
+            SectionType::Applications => self.section_info.app_count,
         }
     }
 
@@ -351,27 +380,31 @@ impl ListDelegate for ItemListDelegate {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Option<impl IntoElement> {
-        let has_calc = self.calculator_item.is_some();
+        let section_type = self.section_type_at(section);
 
         // Calculator section has no header
-        if has_calc && section == 0 {
+        if section_type == SectionType::Calculator {
             return None;
         }
 
-        let adjusted_section = if has_calc { section - 1 } else { section };
+        // Count how many non-calculator sections we have
         let has_windows = self.section_info.window_count > 0;
+        let has_commands = self.section_info.command_count > 0;
         let has_apps = self.section_info.app_count > 0;
+        let non_calc_section_count =
+            has_windows as usize + has_commands as usize + has_apps as usize;
 
-        // Only show headers if we have both Windows and Applications
-        if !has_windows || !has_apps {
+        // Only show headers if we have multiple non-calculator sections
+        if non_calc_section_count <= 1 {
             return None;
         }
 
         let t = theme();
-        let title = if adjusted_section == 0 {
-            "Windows"
-        } else {
-            "Applications"
+        let title = match section_type {
+            SectionType::Calculator => return None,
+            SectionType::Windows => "Windows",
+            SectionType::Commands => "Commands",
+            SectionType::Applications => "Applications",
         };
 
         Some(
@@ -393,9 +426,19 @@ impl ListDelegate for ItemListDelegate {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Option<Self::Item> {
-        let item = self.get_item_at_section(ix.section, ix.row)?;
+        let section_type = self.section_type_at(ix.section);
         let global_idx = self.section_row_to_global(ix.section, ix.row);
         let selected = self.selected_index == Some(global_idx);
+
+        let item = if section_type == SectionType::Calculator {
+            self.calculator_item.clone().map(ListItem::Calculator)?
+        } else {
+            let start = self.section_start_index(section_type);
+            let calc_offset = if self.calculator_item.is_some() { 1 } else { 0 };
+            let filtered_idx = start - calc_offset + ix.row;
+            let item_idx = *self.filtered_indices.get(filtered_idx)?;
+            self.items.get(item_idx)?.clone()
+        };
 
         let item_content = render_item(&item, selected, global_idx);
 

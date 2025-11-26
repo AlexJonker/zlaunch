@@ -59,9 +59,8 @@ fn render_action(act: &crate::items::ActionItem, selected: bool, row: usize) -> 
 }
 
 fn render_submenu(sub: &crate::items::SubmenuItem, selected: bool, row: usize) -> Stateful<Div> {
-    // Submenus don't have file-based icons yet, use placeholder
     let mut item = item_container(row, selected)
-        .child(render_icon(None))
+        .child(render_submenu_icon(sub.icon_name.as_deref()))
         .child(render_text_content(
             &sub.name,
             sub.description.as_deref(),
@@ -74,4 +73,33 @@ fn render_submenu(sub: &crate::items::SubmenuItem, selected: bool, row: usize) -
     }
 
     item
+}
+
+/// Render a submenu icon, using emoji or fallback placeholder.
+fn render_submenu_icon(icon_name: Option<&str>) -> Div {
+    use crate::ui::theme::theme;
+    use gpui::{SharedString, div, prelude::*};
+
+    let theme = theme();
+    let size = theme.icon_size;
+
+    let icon_container = div()
+        .w(size)
+        .h(size)
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(theme.icon_placeholder_background)
+        .rounded_sm();
+
+    // Use emoji based on icon name
+    let emoji = match icon_name {
+        Some("smile") => "😀",
+        Some("settings") => "⚙️",
+        Some("power") => "⏻",
+        _ => "?",
+    };
+
+    icon_container.child(div().text_sm().child(SharedString::from(emoji)))
 }
