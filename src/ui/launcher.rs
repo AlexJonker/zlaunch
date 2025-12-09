@@ -3,6 +3,7 @@ use crate::clipboard::ClipboardContent;
 use crate::compositor::Compositor;
 use crate::desktop::launch_application;
 use crate::items::ListItem;
+use crate::ui::ai;
 use crate::ui::clipboard::delegate::ClipboardListDelegate;
 use crate::ui::emoji::EmojiGridDelegate;
 use crate::ui::items::ItemListDelegate;
@@ -40,6 +41,8 @@ pub enum ViewMode {
     EmojiPicker,
     /// Clipboard history view.
     ClipboardHistory,
+    /// AI response streaming view.
+    AiResponse,
 }
 
 pub fn init(cx: &mut App) {
@@ -63,11 +66,15 @@ pub struct LauncherView {
     emoji_list_state: Option<Entity<ListState<EmojiGridDelegate>>>,
     /// Clipboard history list state (created on demand).
     clipboard_list_state: Option<Entity<ListState<ClipboardListDelegate>>>,
+    /// AI response view (created on demand).
+    ai_response_view: Option<ai::view::AiResponseView>,
     input_state: Entity<InputState>,
     focus_handle: FocusHandle,
     #[allow(dead_code)] // Kept alive for blur handler
     on_hide: std::sync::Arc<dyn Fn() + Send + Sync>,
     _search_task: Task<()>,
+    /// Task for streaming AI responses
+    _ai_stream_task: Task<()>,
 }
 
 impl LauncherView {
@@ -163,10 +170,12 @@ impl LauncherView {
             list_state,
             emoji_list_state: None,
             clipboard_list_state: None,
+            ai_response_view: None,
             input_state,
             focus_handle,
             on_hide,
             _search_task: Task::ready(()),
+            _ai_stream_task: Task::ready(()),
         }
     }
 
@@ -341,6 +350,138 @@ impl LauncherView {
         cx.notify();
     }
 
+    /// Enter AI response mode.
+    fn enter_ai_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Get the AI query from the selected item
+        let selected_item = self.list_state.read(cx).delegate().selected_item();
+        let query = if let Some(ListItem::Ai(ai_item)) = selected_item {
+            ai_item.query.clone()
+        } else {
+            return;
+        };
+
+        // Create AI response view
+        let ai_view = ai::view::AiResponseView::new(query.clone());
+        self.ai_response_view = Some(ai_view);
+
+        // Update input to show just the query (without !ai trigger)
+        self.input_state.update(cx, |input, cx| {
+            input.set_value(query.clone(), window, cx);
+        });
+
+        // Create Gemini client
+        let client = if let Some(client) = crate::ai::GeminiClient::new() {
+            client
+        } else {
+            // Should not happen since we check availability in delegate
+            return;
+        };
+
+        // Switch to AI response mode
+        self.view_mode = ViewMode::AiResponse;
+        cx.notify();
+
+        // Create channel for communication between Tokio thread and GPUI
+        let (tx, rx) = flume::unbounded::<Result<String, String>>();
+
+        // Spawn Tokio thread for LLM request
+        std::thread::spawn(move || {
+            // Create a single-threaded Tokio runtime
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                // Start streaming
+                let stream_result = client.stream_query(&query).await;
+
+                match stream_result {
+                    Ok(mut stream) => {
+                        use futures::StreamExt;
+
+                        // Process tokens as they arrive
+                        while let Some(token_result) = stream.next().await {
+                            match token_result {
+                                Ok(token) => {
+                                    // Send token through channel
+                                    if tx.send(Ok(token)).is_err() {
+                                        break; // Channel closed, stop streaming
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(Err(format!("Stream error: {}", e)));
+                                    break;
+                                }
+                            }
+                        }
+                        // Send completion signal (empty Ok)
+                        let _ = tx.send(Ok(String::new()));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(format!("Failed to connect: {}", e)));
+                    }
+                }
+            });
+        });
+
+        // Poll the channel in GPUI's async context
+        let this = cx.entity().downgrade();
+        self._ai_stream_task = cx.spawn(
+            async move |_this_weak: WeakEntity<Self>, cx: &mut AsyncApp| {
+                while let Ok(msg) = rx.recv_async().await {
+                    let is_complete = matches!(msg, Ok(ref s) if s.is_empty());
+                    let is_error = msg.is_err();
+
+                    let _ = cx.update(|cx| {
+                        if let Some(this) = this.upgrade() {
+                            this.update(cx, |this, cx| {
+                                if let Some(ref mut ai_view) = this.ai_response_view {
+                                    match msg {
+                                        Ok(token) => {
+                                            if !token.is_empty() {
+                                                ai_view.append_token(&token);
+                                            } else {
+                                                // Empty token means streaming complete
+                                                ai_view.finish_streaming();
+                                            }
+                                        }
+                                        Err(error) => {
+                                            ai_view.set_error(error);
+                                        }
+                                    }
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+
+                    if is_complete || is_error {
+                        break;
+                    }
+                }
+            },
+        );
+    }
+
+    /// Exit AI response mode and return to main view.
+    fn exit_ai_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.view_mode = ViewMode::Main;
+
+        // Clean up AI response view
+        self.ai_response_view = None;
+
+        // Clear search and reset placeholder
+        self.input_state.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_placeholder("Search applications...", window, cx);
+        });
+        self.list_state.update(cx, |list_state, _cx| {
+            list_state.delegate_mut().clear_query();
+        });
+        cx.notify();
+    }
+
     /// Handle back action (backspace or back button).
     fn go_back(&mut self, _: &GoBack, window: &mut Window, cx: &mut Context<Self>) {
         match self.view_mode {
@@ -357,6 +498,9 @@ impl LauncherView {
                 if is_empty {
                     self.exit_clipboard_mode(window, cx);
                 }
+            }
+            ViewMode::AiResponse => {
+                self.exit_ai_mode(window, cx);
             }
             ViewMode::Main => {}
         }
@@ -453,6 +597,9 @@ impl LauncherView {
                     });
                 }
             }
+            ViewMode::AiResponse => {
+                // No navigation in AI response view
+            }
         }
     }
 
@@ -511,6 +658,9 @@ impl LauncherView {
                         cx.notify();
                     });
                 }
+            }
+            ViewMode::AiResponse => {
+                // No navigation in AI response view
             }
         }
     }
@@ -572,6 +722,9 @@ impl LauncherView {
                     });
                 }
             }
+            ViewMode::AiResponse => {
+                // No navigation in AI response view
+            }
         }
     }
 
@@ -632,13 +785,16 @@ impl LauncherView {
                     });
                 }
             }
+            ViewMode::AiResponse => {
+                // No navigation in AI response view
+            }
         }
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         match self.view_mode {
             ViewMode::Main => {
-                // Check if selected item is a submenu
+                // Check if selected item is a submenu or AI item
                 let selected_item = self.list_state.read(cx).delegate().selected_item();
 
                 if let Some(ListItem::Submenu(ref submenu)) = selected_item {
@@ -649,6 +805,12 @@ impl LauncherView {
                         self.enter_clipboard_mode(window, cx);
                         return;
                     }
+                }
+
+                // Check if it's an AI item
+                if let Some(ListItem::Ai(_)) = selected_item {
+                    self.enter_ai_mode(window, cx);
+                    return;
                 }
 
                 // Default confirm for other items
@@ -670,6 +832,19 @@ impl LauncherView {
                     });
                 }
             }
+            ViewMode::AiResponse => {
+                // Copy AI response to clipboard if streaming is complete
+                if let Some(ref ai_view) = self.ai_response_view
+                    && !ai_view.is_streaming()
+                    && !ai_view.has_error()
+                {
+                    if let Err(e) = copy_to_clipboard(ai_view.response()) {
+                        tracing::warn!(%e, "Failed to copy AI response to clipboard");
+                    }
+                    // Hide the launcher after copying
+                    (self.on_hide)();
+                }
+            }
         }
     }
 
@@ -685,6 +860,10 @@ impl LauncherView {
             }
             ViewMode::ClipboardHistory => {
                 self.exit_clipboard_mode(window, cx);
+            }
+            ViewMode::AiResponse => {
+                // TODO: Cancel streaming and exit AI mode
+                self.exit_ai_mode(window, cx);
             }
         }
     }
@@ -721,6 +900,15 @@ impl gpui::Render for LauncherView {
                 .mr_2()
                 .on_click(cx.listener(|this, _event, window, cx| {
                     this.exit_clipboard_mode(window, cx);
+                }))
+                .child(Icon::new(IconName::ArrowLeft).text_color(cx.theme().muted_foreground))
+                .into_any_element(),
+            ViewMode::AiResponse => div()
+                .id("back-button")
+                .cursor_pointer()
+                .mr_2()
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.exit_ai_mode(window, cx);
                 }))
                 .child(Icon::new(IconName::ArrowLeft).text_color(cx.theme().muted_foreground))
                 .into_any_element(),
@@ -778,6 +966,17 @@ impl gpui::Render for LauncherView {
                                     selected_item.as_ref(),
                                 )),
                         )
+                        .into_any_element()
+                } else {
+                    div().flex_1().into_any_element()
+                }
+            }
+            ViewMode::AiResponse => {
+                if let Some(ref ai_view) = self.ai_response_view {
+                    div()
+                        .flex_1()
+                        .child(ai_view.render())
+                        .overflow_hidden()
                         .into_any_element()
                 } else {
                     div().flex_1().into_any_element()

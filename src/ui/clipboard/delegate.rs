@@ -128,10 +128,10 @@ impl ListDelegate for ClipboardListDelegate {
     }
 
     fn render_item(
-        &self,
+        &mut self,
         ix: IndexPath,
         _window: &mut Window,
-        _cx: &mut App,
+        _cx: &mut Context<'_, ListState<Self>>,
     ) -> Option<Self::Item> {
         let item = self.items.get(ix.row)?;
         let is_selected = self.selected_index == Some(ix.row);
@@ -173,7 +173,7 @@ impl ListDelegate for ClipboardListDelegate {
         self.do_back();
     }
 
-    fn render_empty(&self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render_empty(&mut self, _window: &mut Window, _cx: &mut Context<'_, ListState<Self>>) -> impl IntoElement {
         let t = theme();
         div()
             .w_full()

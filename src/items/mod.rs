@@ -12,6 +12,8 @@ pub use search::SearchItem;
 pub use submenu::{SubmenuItem, SubmenuLayout};
 pub use window::WindowItem;
 
+use crate::ai::AiItem;
+
 use std::path::PathBuf;
 
 /// A list item that can be displayed in the launcher.
@@ -30,6 +32,8 @@ pub enum ListItem {
     Calculator(CalculatorItem),
     /// A web search item
     Search(SearchItem),
+    /// An AI query item
+    Ai(AiItem),
 }
 
 impl ListItem {
@@ -42,6 +46,7 @@ impl ListItem {
             Self::Submenu(sub) => &sub.id,
             Self::Calculator(calc) => &calc.id,
             Self::Search(search) => &search.id,
+            Self::Ai(ai) => &ai.id,
         }
     }
 
@@ -54,6 +59,7 @@ impl ListItem {
             Self::Submenu(sub) => &sub.name,
             Self::Calculator(calc) => &calc.expression,
             Self::Search(search) => &search.name,
+            Self::Ai(ai) => &ai.name,
         }
     }
 
@@ -66,6 +72,7 @@ impl ListItem {
             Self::Submenu(sub) => sub.description.as_deref(),
             Self::Calculator(calc) => Some(&calc.display_result),
             Self::Search(_) => None,
+            Self::Ai(_) => None, // Description handled in render function
         }
     }
 
@@ -78,6 +85,7 @@ impl ListItem {
             Self::Submenu(_) => None,    // Submenus use icon names, not paths
             Self::Calculator(_) => None, // Calculator uses custom icon
             Self::Search(_) => None,     // Search uses Phosphor icons
+            Self::Ai(_) => None,         // AI uses Phosphor icons
         }
     }
 
@@ -115,15 +123,17 @@ impl ListItem {
             Self::Submenu(_) => "Open",
             Self::Calculator(_) => "Copy",
             Self::Search(_) => "Open",
+            Self::Ai(_) => "Ask",
         }
     }
 
     /// Get the sort priority for this item type.
     /// Lower values appear first in the list.
-    /// Calculator (0) < Search (1) < Windows (2) < Commands/Actions (3) < Applications (4)
+    /// Calculator (0) < AI/Search (1) < Windows (2) < Commands/Actions (3) < Applications (4)
     pub fn sort_priority(&self) -> u8 {
         match self {
             Self::Calculator(_) => 0,
+            Self::Ai(_) => 1,
             Self::Search(_) => 1,
             Self::Window(_) => 2,
             Self::Submenu(_) => 3,
@@ -136,6 +146,7 @@ impl ListItem {
     pub fn section_name(&self) -> &'static str {
         match self {
             Self::Calculator(_) => "Calculator",
+            Self::Ai(_) => "AI",
             Self::Search(_) => "Search",
             Self::Window(_) => "Windows",
             Self::Submenu(_) => "Commands",
@@ -180,5 +191,11 @@ impl From<CalculatorItem> for ListItem {
 impl From<SearchItem> for ListItem {
     fn from(item: SearchItem) -> Self {
         Self::Search(item)
+    }
+}
+
+impl From<AiItem> for ListItem {
+    fn from(item: AiItem) -> Self {
+        Self::Ai(item)
     }
 }

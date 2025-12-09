@@ -9,15 +9,15 @@ authors = ["Leonard Seibold <git@zrtx.de>"]
 
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "7c724c0f1049e610c541c2f4f6a8739f91865e02" }
-gpui-component = "0.4.1"
-gpui-component-assets = "0.4.1"
+gpui-component = "0.5.0"
+gpui-component-assets = "0.5.0"
 rust-embed = "8"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 freedesktop-desktop-entry = "0.7"
 freedesktop-icons = "0.4"
 dirs = "6"
-flume = "0.11"
+flume = "0.12"
 fuzzy-matcher = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -32,6 +32,9 @@ image = "0.25"
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 urlencoding = "2"
+llm = "1.3"
+futures = "0.3"
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [patch.crates-io]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "7c724c0f1049e610c541c2f4f6a8739f91865e02" }

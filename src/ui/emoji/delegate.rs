@@ -158,10 +158,10 @@ impl ListDelegate for EmojiGridDelegate {
     }
 
     fn render_item(
-        &self,
+        &mut self,
         ix: IndexPath,
         _window: &mut Window,
-        _cx: &mut App,
+        _cx: &mut Context<'_, ListState<Self>>,
     ) -> Option<Self::Item> {
         let row = ix.row;
         let emojis = self.emojis_for_row(row);
@@ -211,7 +211,7 @@ impl ListDelegate for EmojiGridDelegate {
         self.do_back();
     }
 
-    fn render_empty(&self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render_empty(&mut self, _window: &mut Window, _cx: &mut Context<'_, ListState<Self>>) -> impl IntoElement {
         let t = theme();
         div()
             .w_full()

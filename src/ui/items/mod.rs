@@ -1,9 +1,11 @@
+mod ai;
 mod application;
 mod base;
 mod calculator;
 mod delegate;
 mod search;
 
+pub use ai::render_ai;
 pub use application::render_application;
 pub use base::{item_container, render_action_indicator, render_icon, render_text_content};
 pub use calculator::render_calculator;
@@ -25,6 +27,7 @@ pub fn render_item(item: &ListItem, selected: bool, row: usize) -> Stateful<Div>
         ListItem::Submenu(sub) => render_submenu(sub, selected, row),
         ListItem::Calculator(calc) => render_calculator(calc, selected, row),
         ListItem::Search(search) => render_search(search, selected, row),
+        ListItem::Ai(ai) => render_ai(ai, selected, row),
     }
 }
 

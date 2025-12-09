@@ -27,6 +27,7 @@ pub struct SectionInfo {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SectionType {
     Calculator,
+    Ai,
     Search,
     Windows,
     Commands,
@@ -42,6 +43,8 @@ pub struct ItemListDelegate {
     query: String,
     /// Calculator result shown at the top when the query is a math expression.
     calculator_item: Option<CalculatorItem>,
+    /// AI item shown when query triggers !ai.
+    ai_item: Option<crate::ai::AiItem>,
     /// Search items shown when query triggers search or when no matches found.
     search_items: Vec<SearchItem>,
     on_confirm: Option<Arc<dyn Fn(&ListItem) + Send + Sync>>,
@@ -78,6 +81,7 @@ impl ItemListDelegate {
             selected_index: if len > 0 { Some(0) } else { None },
             query: String::new(),
             calculator_item: None,
+            ai_item: None,
             search_items: Vec::new(),
             on_confirm: None,
             on_cancel: None,
@@ -156,15 +160,26 @@ impl ItemListDelegate {
             // Evaluate calculator expression
             self.calculator_item = self.try_evaluate_calculator(&query);
 
-            // Generate search items
             let has_matches = !indices.is_empty();
-            self.search_items = self.try_generate_search_items(&query, has_matches);
+
+            // Generate AI item (shows when !ai trigger or no matches)
+            self.ai_item = self.try_generate_ai_item(&query, has_matches);
+
+            // Generate search items
+            // Hide search items only if using !ai trigger
+            let trimmed = query.trim();
+            self.search_items = if trimmed.starts_with("!ai") {
+                Vec::new()
+            } else {
+                self.try_generate_search_items(&query, has_matches)
+            };
 
             self.section_info = Self::compute_section_info(&self.items, &indices);
             self.section_info.search_count = self.search_items.len();
             self.filtered_indices = indices;
 
             let has_items = self.calculator_item.is_some()
+                || self.ai_item.is_some()
                 || !self.search_items.is_empty()
                 || !self.filtered_indices.is_empty();
             self.selected_index = if has_items { Some(0) } else { None };
@@ -176,16 +191,26 @@ impl ItemListDelegate {
         self.calculator_item = self.try_evaluate_calculator(&self.query.clone());
 
         self.filtered_indices = Self::filter_items_sync(&self.items, &self.query);
+        let has_matches = !self.filtered_indices.is_empty();
+
+        // Generate AI item (shows when !ai trigger or no matches)
+        self.ai_item = self.try_generate_ai_item(&self.query, has_matches);
 
         // Generate search items
-        let has_matches = !self.filtered_indices.is_empty();
-        self.search_items = self.try_generate_search_items(&self.query, has_matches);
+        // Hide search items only if using !ai trigger
+        let trimmed = self.query.trim();
+        self.search_items = if trimmed.starts_with("!ai") {
+            Vec::new()
+        } else {
+            self.try_generate_search_items(&self.query, has_matches)
+        };
 
         self.section_info = Self::compute_section_info(&self.items, &self.filtered_indices);
         self.section_info.search_count = self.search_items.len();
 
-        // Set selection: calculator at 0 if present, otherwise first filtered item
+        // Set selection: calculator at 0 if present, otherwise AI, otherwise search, otherwise first filtered item
         let has_items = self.calculator_item.is_some()
+            || self.ai_item.is_some()
             || !self.search_items.is_empty()
             || !self.filtered_indices.is_empty();
         self.selected_index = if has_items { Some(0) } else { None };
@@ -229,12 +254,48 @@ impl ItemListDelegate {
         }
     }
 
+    /// Generate AI item if the query triggers !ai or when there are no other matches.
+    /// Similar to search items behavior.
+    fn try_generate_ai_item(&self, query: &str, has_matches: bool) -> Option<crate::ai::AiItem> {
+        // Don't show AI item if calculator is active
+        if self.calculator_item.is_some() {
+            return None;
+        }
+
+        // Check if Gemini API is available
+        if !crate::ai::GeminiClient::is_available() {
+            return None;
+        }
+
+        let trimmed = query.trim();
+
+        // Check if query starts with !ai trigger
+        if let Some(stripped) = trimmed.strip_prefix("!ai") {
+            // Extract the query after the trigger
+            let ai_query = stripped.trim();
+
+            if ai_query.is_empty() {
+                // Just the trigger, no query yet
+                return None;
+            }
+
+            return Some(crate::ai::AiItem::new(ai_query.to_string()));
+        }
+
+        // Also show AI item when there are no matches (like search items)
+        if !has_matches && !trimmed.is_empty() {
+            return Some(crate::ai::AiItem::new(trimmed.to_string()));
+        }
+
+        None
+    }
+
     /// Check if a calculator item is currently shown.
     pub fn has_calculator(&self) -> bool {
         self.calculator_item.is_some()
     }
 
-    /// Get the item at a global row index, accounting for calculator and search items.
+    /// Get the item at a global row index, accounting for calculator, AI, and search items.
     fn get_item_at(&self, row: usize) -> Option<ListItem> {
         let mut offset = 0;
 
@@ -246,7 +307,15 @@ impl ItemListDelegate {
             offset += 1;
         }
 
-        // Search items come after calculator
+        // AI item comes after calculator
+        if self.ai_item.is_some() {
+            if row == offset {
+                return self.ai_item.clone().map(ListItem::Ai);
+            }
+            offset += 1;
+        }
+
+        // Search items come after AI
         let search_count = self.search_items.len();
         if row < offset + search_count {
             let search_idx = row - offset;
@@ -274,12 +343,14 @@ impl ItemListDelegate {
     /// Convert global index to section + row.
     pub fn global_to_section_row(&self, global: usize) -> (usize, usize) {
         let has_calc = self.calculator_item.is_some();
+        let has_ai = self.ai_item.is_some();
         let has_search = self.section_info.search_count > 0;
         let has_windows = self.section_info.window_count > 0;
         let has_commands = self.section_info.command_count > 0;
 
         let calc_offset = if has_calc { 1 } else { 0 };
-        let search_end = calc_offset + self.section_info.search_count;
+        let ai_end = calc_offset + if has_ai { 1 } else { 0 };
+        let search_end = ai_end + self.section_info.search_count;
         let window_end = search_end + self.section_info.window_count;
         let command_end = window_end + self.section_info.command_count;
 
@@ -293,9 +364,16 @@ impl ItemListDelegate {
             section_idx += 1;
         }
 
+        if has_ai {
+            if global < ai_end {
+                return (section_idx, global - calc_offset);
+            }
+            section_idx += 1;
+        }
+
         if has_search {
             if global < search_end {
-                return (section_idx, global - calc_offset);
+                return (section_idx, global - ai_end);
             }
             section_idx += 1;
         }
@@ -321,6 +399,7 @@ impl ItemListDelegate {
     pub fn clear_query(&mut self) {
         self.query.clear();
         self.calculator_item = None;
+        self.ai_item = None;
         self.search_items.clear();
         self.filter_items();
     }
@@ -342,8 +421,9 @@ impl ItemListDelegate {
 
     pub fn filtered_count(&self) -> usize {
         let calc_count = if self.calculator_item.is_some() { 1 } else { 0 };
+        let ai_count = if self.ai_item.is_some() { 1 } else { 0 };
         let search_count = self.search_items.len();
-        self.filtered_indices.len() + calc_count + search_count
+        self.filtered_indices.len() + calc_count + ai_count + search_count
     }
 
     pub fn selected_index(&self) -> Option<usize> {
@@ -377,6 +457,7 @@ impl ItemListDelegate {
     /// Determine what type of section is at the given section index.
     fn section_type_at(&self, section: usize) -> SectionType {
         let has_calc = self.calculator_item.is_some();
+        let has_ai = self.ai_item.is_some();
         let has_search = self.section_info.search_count > 0;
         let has_windows = self.section_info.window_count > 0;
         let has_commands = self.section_info.command_count > 0;
@@ -386,6 +467,13 @@ impl ItemListDelegate {
         if has_calc {
             if section == current_section {
                 return SectionType::Calculator;
+            }
+            current_section += 1;
+        }
+
+        if has_ai {
+            if section == current_section {
+                return SectionType::Ai;
             }
             current_section += 1;
         }
@@ -416,17 +504,21 @@ impl ItemListDelegate {
     /// Get the starting filtered index for a given section type.
     fn section_start_index(&self, section_type: SectionType) -> usize {
         let has_calc = self.calculator_item.is_some();
+        let has_ai = self.ai_item.is_some();
         let calc_offset = if has_calc { 1 } else { 0 };
+        let ai_offset = if has_ai { 1 } else { 0 };
 
         match section_type {
             SectionType::Calculator => 0,
-            SectionType::Search => calc_offset,
-            SectionType::Windows => calc_offset + self.section_info.search_count,
+            SectionType::Ai => calc_offset,
+            SectionType::Search => calc_offset + ai_offset,
+            SectionType::Windows => calc_offset + ai_offset + self.section_info.search_count,
             SectionType::Commands => {
-                calc_offset + self.section_info.search_count + self.section_info.window_count
+                calc_offset + ai_offset + self.section_info.search_count + self.section_info.window_count
             }
             SectionType::Applications => {
                 calc_offset
+                    + ai_offset
                     + self.section_info.search_count
                     + self.section_info.window_count
                     + self.section_info.command_count
@@ -440,6 +532,7 @@ impl ListDelegate for ItemListDelegate {
 
     fn sections_count(&self, _cx: &App) -> usize {
         let has_calc = self.calculator_item.is_some();
+        let has_ai = self.ai_item.is_some();
         let has_search = self.section_info.search_count > 0;
         let has_windows = self.section_info.window_count > 0;
         let has_commands = self.section_info.command_count > 0;
@@ -447,6 +540,9 @@ impl ListDelegate for ItemListDelegate {
 
         let mut count = 0;
         if has_calc {
+            count += 1;
+        }
+        if has_ai {
             count += 1;
         }
         if has_search {
@@ -468,6 +564,7 @@ impl ListDelegate for ItemListDelegate {
         let section_type = self.section_type_at(section);
         match section_type {
             SectionType::Calculator => 1,
+            SectionType::Ai => 1,
             SectionType::Search => self.section_info.search_count,
             SectionType::Windows => self.section_info.window_count,
             SectionType::Commands => self.section_info.command_count,
@@ -476,15 +573,18 @@ impl ListDelegate for ItemListDelegate {
     }
 
     fn render_section_header(
-        &self,
+        &mut self,
         section: usize,
         _window: &mut Window,
-        _cx: &mut App,
+        _cx: &mut Context<'_, ListState<Self>>,
     ) -> Option<impl IntoElement> {
         let section_type = self.section_type_at(section);
 
-        // Calculator and Search sections have no header
-        if section_type == SectionType::Calculator || section_type == SectionType::Search {
+        // Calculator, AI, and Search sections have no header
+        if section_type == SectionType::Calculator
+            || section_type == SectionType::Ai
+            || section_type == SectionType::Search
+        {
             return None;
         }
 
@@ -503,6 +603,7 @@ impl ListDelegate for ItemListDelegate {
         let t = theme();
         let title = match section_type {
             SectionType::Calculator => return None,
+            SectionType::Ai => return None,
             SectionType::Search => return None,
             SectionType::Windows => "Windows",
             SectionType::Commands => "Commands",
@@ -523,10 +624,10 @@ impl ListDelegate for ItemListDelegate {
     }
 
     fn render_item(
-        &self,
+        &mut self,
         ix: IndexPath,
         _window: &mut Window,
-        _cx: &mut App,
+        _cx: &mut Context<'_, ListState<Self>>,
     ) -> Option<Self::Item> {
         let section_type = self.section_type_at(ix.section);
         let global_idx = self.section_row_to_global(ix.section, ix.row);
@@ -534,6 +635,8 @@ impl ListDelegate for ItemListDelegate {
 
         let item = if section_type == SectionType::Calculator {
             self.calculator_item.clone().map(ListItem::Calculator)?
+        } else if section_type == SectionType::Ai {
+            self.ai_item.clone().map(ListItem::Ai)?
         } else if section_type == SectionType::Search {
             self.search_items
                 .get(ix.row)
@@ -542,8 +645,9 @@ impl ListDelegate for ItemListDelegate {
         } else {
             let start = self.section_start_index(section_type);
             let calc_offset = if self.calculator_item.is_some() { 1 } else { 0 };
+            let ai_offset = if self.ai_item.is_some() { 1 } else { 0 };
             let search_offset = self.search_items.len();
-            let filtered_idx = start - calc_offset - search_offset + ix.row;
+            let filtered_idx = start - calc_offset - ai_offset - search_offset + ix.row;
             let item_idx = *self.filtered_indices.get(filtered_idx)?;
             self.items.get(item_idx)?.clone()
         };
@@ -592,7 +696,7 @@ impl ListDelegate for ItemListDelegate {
         self.do_cancel();
     }
 
-    fn render_empty(&self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render_empty(&mut self, _window: &mut Window, _cx: &mut Context<'_, ListState<Self>>) -> impl IntoElement {
         let t = theme();
         div()
             .w_full()
