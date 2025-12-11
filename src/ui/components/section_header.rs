@@ -1,5 +1,5 @@
 use crate::ui::theme::theme;
-use gpui::{div, prelude::*, Div, SharedString};
+use gpui::{Div, SharedString, div, prelude::*};
 
 /// A section header component for dividing groups of items in a list.
 ///

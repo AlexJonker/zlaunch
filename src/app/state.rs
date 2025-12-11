@@ -1,4 +1,4 @@
-use crate::ipc::IpcServer;
+use crate::ipc::IpcServerHandle;
 use crate::items::{ApplicationItem, ListItem};
 use gpui::WindowHandle;
 use gpui_component::Root;
@@ -42,8 +42,8 @@ pub struct AppState {
     pub applications: Vec<ApplicationItem>,
     /// Navigation stack for submenu support (future)
     pub view_stack: Vec<ViewContext>,
-    /// IPC server for receiving commands
-    pub ipc_server: Option<IpcServer>,
+    /// IPC server handle for receiving commands
+    pub ipc_server: Option<IpcServerHandle>,
     /// Current window handle if visible
     pub window_handle: Option<WindowHandle<Root>>,
     /// Whether the window is currently visible
@@ -52,7 +52,7 @@ pub struct AppState {
 
 impl AppState {
     /// Create new application state with loaded applications.
-    pub fn new(applications: Vec<ApplicationItem>, ipc_server: Option<IpcServer>) -> Self {
+    pub fn new(applications: Vec<ApplicationItem>, ipc_server: Option<IpcServerHandle>) -> Self {
         Self {
             applications,
             view_stack: Vec::new(),

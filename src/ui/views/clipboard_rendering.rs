@@ -3,7 +3,7 @@
 use crate::assets::PhosphorIcon;
 use crate::clipboard::{ClipboardContent, ClipboardItem};
 use crate::ui::theme::theme;
-use crate::ui::utils::color::{parse_color, Color};
+use crate::ui::utils::color::{Color, parse_color};
 use gpui::{Div, ElementId, SharedString, Stateful, div, img, prelude::*, px, svg};
 use std::fs;
 use std::path::PathBuf;
@@ -451,15 +451,9 @@ fn render_image_preview_full(panel: Div, width: usize, height: usize, rgba_bytes
         let mut png_bytes = Vec::new();
         let mut cursor = Cursor::new(&mut png_bytes);
 
-        if img_buffer
-            .write_to(&mut cursor, ImageFormat::Png)
-            .is_ok()
-        {
+        if img_buffer.write_to(&mut cursor, ImageFormat::Png).is_ok() {
             // Create GPUI Image from PNG bytes and wrap in Arc
-            let gpui_image = Arc::new(gpui::Image::from_bytes(
-                gpui::ImageFormat::Png,
-                png_bytes,
-            ));
+            let gpui_image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png_bytes));
 
             // Use the in-memory image directly
             return panel.child(

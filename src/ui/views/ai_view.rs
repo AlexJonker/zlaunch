@@ -1,7 +1,7 @@
 //! AI response view for displaying streaming responses.
 
-use crate::ui::theme::theme;
 use crate::ui::markdown::render_markdown;
+use crate::ui::theme::theme;
 use gpui::{Div, SharedString, div, prelude::*};
 use gpui_component::scroll::ScrollableElement;
 

@@ -4,12 +4,14 @@ use gpui_component::theme::{Theme, ThemeMode};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
+use crate::app::window::LauncherWindow;
 use crate::app::{DaemonEvent, WindowEvent, create_daemon_channel, window};
 use crate::assets::CombinedAssets;
 use crate::compositor::{Compositor, detect_compositor};
 use crate::desktop::cache::load_applications;
 use crate::desktop::capture_session_environment;
-use crate::ipc::{Command, IpcServer, client};
+use crate::ipc::client;
+use crate::ipc::{IpcServerHandle, start_server};
 use crate::items::ApplicationItem;
 use crate::ui::init_launcher;
 
@@ -19,8 +21,8 @@ pub fn init_logging() {
 
     // By default, only log from zlaunch crate at info level
     // Users can override with RUST_LOG environment variable
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("zlaunch=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("zlaunch=info"));
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_target(false).without_time())
@@ -45,12 +47,16 @@ pub fn run() -> Result<()> {
     let _clipboard_monitor_handle = crate::clipboard::monitor::start_monitor();
     info!("Started clipboard monitor");
 
-    let ipc_server = match IpcServer::new() {
-        Ok(server) => server,
+    // Create unified event channel
+    let (event_tx, event_rx) = create_daemon_channel();
+
+    // Start tarpc IPC server
+    let _ipc_handle: IpcServerHandle = match start_server(event_tx.clone()) {
+        Ok(handle) => handle,
         Err(e) => {
             if client::is_daemon_running() {
                 debug!("Daemon already running, sending toggle command");
-                client::send_command(Command::Toggle)?;
+                client::toggle()?;
                 return Ok(());
             }
             return Err(e);
@@ -65,23 +71,6 @@ pub fn run() -> Result<()> {
     let applications: Vec<ApplicationItem> = entries.into_iter().map(Into::into).collect();
     info!(count = applications.len(), "Loaded applications");
 
-    // Create unified event channel
-    let (event_tx, event_rx) = create_daemon_channel();
-
-    // Spawn background thread for blocking IPC accept
-    let ipc_listener = ipc_server.listener();
-    let ipc_event_tx = event_tx.clone();
-    std::thread::spawn(move || {
-        loop {
-            if let Some(cmd) = IpcServer::accept_blocking(&ipc_listener)
-                && ipc_event_tx.send(DaemonEvent::Ipc(cmd)).is_err()
-            {
-                // Channel closed, exit thread
-                break;
-            }
-        }
-    });
-
     Application::new()
         .with_assets(CombinedAssets)
         .with_quit_mode(QuitMode::Explicit)
@@ -95,7 +84,7 @@ pub fn run() -> Result<()> {
 
             let applications_clone = applications.clone();
             let compositor_clone = compositor.clone();
-            let mut window_handle = None;
+            let mut launcher_window: Option<LauncherWindow> = None;
             let mut visible = false;
 
             // Main event loop - async wait on channel, no polling needed
@@ -104,48 +93,140 @@ pub fn run() -> Result<()> {
                     match event {
                         DaemonEvent::Window(WindowEvent::RequestHide) if visible => {
                             let _ = cx.update(|cx| {
-                                if let Some(ref handle) = window_handle {
-                                    window::close_window(handle, cx);
+                                if let Some(ref lw) = launcher_window {
+                                    window::close_window(&lw.handle, cx);
                                 }
                             });
-                            window_handle = None;
+                            launcher_window = None;
                             visible = false;
                         }
-                        DaemonEvent::Ipc(cmd) => {
-                            let _ = cx.update(|cx| match cmd {
-                                Command::Show | Command::Toggle if !visible => {
+
+                        DaemonEvent::Show { response_tx } => {
+                            let result = if !visible {
+                                cx.update(|cx| {
                                     match window::create_and_show_window(
                                         applications_clone.clone(),
                                         compositor_clone.clone(),
                                         event_tx.clone(),
                                         cx,
                                     ) {
-                                        Ok(handle) => {
-                                            window_handle = Some(handle);
+                                        Ok(lw) => {
+                                            launcher_window = Some(lw);
                                             visible = true;
+                                            Ok(())
                                         }
-                                        Err(e) => error!(%e, "Failed to create window"),
+                                        Err(e) => {
+                                            error!(%e, "Failed to create window");
+                                            Err(format!("Failed to create window: {}", e))
+                                        }
                                     }
-                                }
-                                Command::Hide | Command::Toggle if visible => {
-                                    if let Some(ref handle) = window_handle {
-                                        window::close_window(handle, cx);
-                                        window_handle = None;
-                                        visible = false;
+                                })
+                                .unwrap_or(Err("Failed to update app".to_string()))
+                            } else {
+                                Ok(()) // Already visible
+                            };
+                            let _ = response_tx.send(result);
+                        }
+
+                        DaemonEvent::Hide { response_tx } => {
+                            if visible {
+                                let _ = cx.update(|cx| {
+                                    if let Some(ref lw) = launcher_window {
+                                        window::close_window(&lw.handle, cx);
                                     }
-                                }
-                                Command::Quit => {
-                                    cx.quit();
-                                }
-                                _ => {}
+                                });
+                                launcher_window = None;
+                                visible = false;
+                            }
+                            let _ = response_tx.send(Ok(()));
+                        }
+
+                        DaemonEvent::Toggle { response_tx } => {
+                            let result = if visible {
+                                let _ = cx.update(|cx| {
+                                    if let Some(ref lw) = launcher_window {
+                                        window::close_window(&lw.handle, cx);
+                                    }
+                                });
+                                launcher_window = None;
+                                visible = false;
+                                Ok(())
+                            } else {
+                                cx.update(|cx| {
+                                    match window::create_and_show_window(
+                                        applications_clone.clone(),
+                                        compositor_clone.clone(),
+                                        event_tx.clone(),
+                                        cx,
+                                    ) {
+                                        Ok(lw) => {
+                                            launcher_window = Some(lw);
+                                            visible = true;
+                                            Ok(())
+                                        }
+                                        Err(e) => {
+                                            error!(%e, "Failed to create window");
+                                            Err(format!("Failed to create window: {}", e))
+                                        }
+                                    }
+                                })
+                                .unwrap_or(Err("Failed to update app".to_string()))
+                            };
+                            let _ = response_tx.send(result);
+                        }
+
+                        DaemonEvent::Quit { response_tx } => {
+                            let _ = response_tx.send(Ok(()));
+                            let _ = cx.update(|cx| {
+                                cx.quit();
                             });
                         }
+
+                        DaemonEvent::SetTheme { name, response_tx } => {
+                            let result = handle_set_theme(&name);
+                            // If window is open, refresh the theme on the view
+                            if visible && let Some(ref lw) = launcher_window {
+                                let view = lw.launcher_view.clone();
+                                let _ = cx.update(|cx| {
+                                    view.update(cx, |launcher, cx| {
+                                        launcher.refresh_theme(cx);
+                                    });
+                                });
+                            }
+                            let _ = response_tx.send(result);
+                        }
+
                         _ => {}
                     }
                 }
             })
             .detach();
         });
+
+    Ok(())
+}
+
+/// Handle the SetTheme IPC command.
+fn handle_set_theme(name: &str) -> Result<(), String> {
+    // Try to load the theme
+    let theme =
+        crate::config::load_theme(name).ok_or_else(|| format!("Theme '{}' not found", name))?;
+
+    // Set the global theme (in-memory)
+    crate::ui::theme::set_theme(theme);
+
+    // Only persist if config file exists
+    if crate::config::config_file_exists() {
+        if let Err(e) = crate::config::save_theme_to_config(name) {
+            tracing::warn!(%e, "Failed to save theme to config");
+            // Don't return error - theme is still applied in memory
+        }
+    } else {
+        tracing::info!(
+            "No config file exists, theme '{}' applied for session only",
+            name
+        );
+    }
 
     Ok(())
 }

@@ -6,7 +6,7 @@
 //! - Handling clipboard item selection and pasting
 
 use crate::calculator::copy_to_clipboard;
-use crate::clipboard::{data::search_items, ClipboardContent};
+use crate::clipboard::{ClipboardContent, data::search_items};
 use crate::ui::delegates::ClipboardListDelegate;
 use gpui::{AppContext, Context, Entity, Subscription, Window};
 use gpui_component::input::{InputEvent, InputState};
@@ -80,13 +80,21 @@ impl ClipboardModeHandler {
     }
 
     /// Update input placeholder when entering clipboard mode.
-    pub fn setup_input(input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn setup_input(
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value("", window, cx);
         input_state.set_placeholder("Search clipboard history...", window, cx);
     }
 
     /// Restore input placeholder when exiting clipboard mode.
-    pub fn restore_input(input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn restore_input(
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value("", window, cx);
         input_state.set_placeholder("Search applications...", window, cx);
     }

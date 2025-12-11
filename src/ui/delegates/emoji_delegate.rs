@@ -1,10 +1,10 @@
 use crate::emoji::EmojiItem;
-use crate::ui::theme::theme;
 use crate::ui::delegates::BaseDelegate;
-use crate::ui::views::{render_emoji_row};
-use gpui::{div, prelude::*, App, Context, SharedString, Task, Window};
-use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
+use crate::ui::theme::theme;
+use crate::ui::views::render_emoji_row;
+use gpui::{App, Context, SharedString, Task, Window, div, prelude::*};
 use gpui_component::IndexPath;
+use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
 
 /// Delegate for the emoji picker grid.
 ///
@@ -79,8 +79,7 @@ impl EmojiGridDelegate {
                 .iter()
                 .enumerate()
                 .filter(|(_, item)| {
-                    item.emoji.contains(query)
-                        || item.name.to_lowercase().contains(&query_lower)
+                    item.emoji.contains(query) || item.name.to_lowercase().contains(&query_lower)
                 })
                 .map(|(idx, _)| idx)
                 .collect();
@@ -201,7 +200,12 @@ impl ListDelegate for EmojiGridDelegate {
         let emojis = self.emojis_for_row(row);
         let start_index = row * self.columns;
 
-        let row_element = render_emoji_row(&emojis, start_index, self.base.selected_index(), self.columns);
+        let row_element = render_emoji_row(
+            &emojis,
+            start_index,
+            self.base.selected_index(),
+            self.columns,
+        );
 
         Some(
             GpuiListItem::new(("emoji-row", row))
@@ -218,7 +222,8 @@ impl ListDelegate for EmojiGridDelegate {
         _cx: &mut Context<ListState<Self>>,
     ) {
         // Convert row to first item in that row
-        self.base.set_selected(ix.map(|i| i.row * self.columns).unwrap_or(0));
+        self.base
+            .set_selected(ix.map(|i| i.row * self.columns).unwrap_or(0));
     }
 
     fn perform_search(

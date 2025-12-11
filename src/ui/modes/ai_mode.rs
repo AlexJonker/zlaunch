@@ -54,7 +54,10 @@ impl AiModeHandler {
         // Create task to poll the channel
         let stream_task = Self::spawn_polling_task(rx, launcher_entity, cx);
 
-        Some(Self { view, _stream_task: stream_task })
+        Some(Self {
+            view,
+            _stream_task: stream_task,
+        })
     }
 
     /// Spawn a task that polls the streaming channel and updates the view.
@@ -92,11 +95,8 @@ impl AiModeHandler {
     ///
     /// This is called from the polling task through the launcher.
     /// We need access to self through the launcher's update context.
-    fn update_view_with_token<T>(
-        launcher: &mut T,
-        msg: Result<String, String>,
-        cx: &mut Context<T>,
-    ) where
+    fn update_view_with_token<T>(launcher: &mut T, msg: Result<String, String>, cx: &mut Context<T>)
+    where
         T: AiModeAccess + 'static,
     {
         if let Some(handler) = launcher.ai_mode_handler_mut() {
@@ -123,12 +123,21 @@ impl AiModeHandler {
     }
 
     /// Update the input field when entering AI mode.
-    pub fn update_input(query: &str, input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn update_input(
+        query: &str,
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value(query.to_string(), window, cx);
     }
 
     /// Clear the input field when exiting AI mode.
-    pub fn clear_input(input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn clear_input(
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value("", window, cx);
         input_state.set_placeholder("Search applications...", window, cx);
     }

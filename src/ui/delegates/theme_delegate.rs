@@ -2,9 +2,9 @@ use crate::items::ThemeItem;
 use crate::ui::delegates::BaseDelegate;
 use crate::ui::theme::theme;
 use crate::ui::views::render_theme_item;
-use gpui::{div, prelude::*, App, Context, SharedString, Task, Window};
-use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
+use gpui::{App, Context, SharedString, Task, Window, div, prelude::*};
 use gpui_component::IndexPath;
+use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
 
 /// Delegate for the theme picker list.
 ///

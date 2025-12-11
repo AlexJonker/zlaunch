@@ -42,6 +42,13 @@ fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|p| p.join("zlaunch"))
 }
 
+/// Check if the config file exists.
+pub fn config_file_exists() -> bool {
+    config_dir()
+        .map(|p| p.join("config.toml").exists())
+        .unwrap_or(false)
+}
+
 /// Load application config from ~/.config/zlaunch/config.toml
 /// Returns None if the config file doesn't exist
 /// Logs warning and returns None if parsing fails
@@ -117,7 +124,11 @@ pub fn load_theme(name: &str) -> Option<LauncherTheme> {
     let theme_path = themes_dir.join(format!("{}.toml", name));
 
     if !theme_path.exists() {
-        tracing::debug!("Theme '{}' not found in bundled themes or at {:?}", name, theme_path);
+        tracing::debug!(
+            "Theme '{}' not found in bundled themes or at {:?}",
+            name,
+            theme_path
+        );
         return None;
     }
 
@@ -130,20 +141,12 @@ pub fn load_theme(name: &str) -> Option<LauncherTheme> {
                 Some(theme)
             }
             Err(e) => {
-                tracing::warn!(
-                    "Failed to parse theme file at {:?}: {}",
-                    theme_path,
-                    e
-                );
+                tracing::warn!("Failed to parse theme file at {:?}: {}", theme_path, e);
                 None
             }
         },
         Err(e) => {
-            tracing::warn!(
-                "Failed to read theme file at {:?}: {}",
-                theme_path,
-                e
-            );
+            tracing::warn!("Failed to read theme file at {:?}: {}", theme_path, e);
             None
         }
     }
@@ -257,7 +260,8 @@ pub fn list_all_themes_with_source() -> Vec<(String, ThemeSource)> {
 /// Returns an error if saving fails
 pub fn save_theme_to_config(theme_name: &str) -> anyhow::Result<()> {
     // Get or create config directory
-    let config_dir = config_dir().ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?;
+    let config_dir =
+        config_dir().ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?;
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir)?;
     }
@@ -276,7 +280,11 @@ pub fn save_theme_to_config(theme_name: &str) -> anyhow::Result<()> {
     // Write to file
     std::fs::write(&config_path, toml_content)?;
 
-    tracing::info!("Saved theme '{}' to config file at {:?}", theme_name, config_path);
+    tracing::info!(
+        "Saved theme '{}' to config file at {:?}",
+        theme_name,
+        config_path
+    );
 
     Ok(())
 }

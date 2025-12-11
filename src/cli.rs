@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::ipc::{Command, client};
+use crate::ipc::client;
 
 #[derive(Parser)]
 #[command(name = "zlaunch")]
@@ -21,18 +21,22 @@ pub enum Commands {
     Toggle,
     /// Quit the daemon
     Quit,
+    /// Theme management
+    Theme {
+        #[command(subcommand)]
+        action: Option<ThemeCommands>,
+    },
 }
 
-impl Commands {
-    /// Convert to IPC command.
-    pub fn to_ipc_command(&self) -> Command {
-        match self {
-            Commands::Show => Command::Show,
-            Commands::Hide => Command::Hide,
-            Commands::Toggle => Command::Toggle,
-            Commands::Quit => Command::Quit,
-        }
-    }
+#[derive(Subcommand)]
+pub enum ThemeCommands {
+    /// List available themes
+    List,
+    /// Set the active theme
+    Set {
+        /// Name of the theme to set
+        name: String,
+    },
 }
 
 /// Handle a client command by sending it to the running daemon.
@@ -41,6 +45,43 @@ pub fn handle_client_command(cmd: Commands) -> Result<()> {
         anyhow::bail!("zlaunch daemon is not running. Start it first by running: zlaunch");
     }
 
-    client::send_command(cmd.to_ipc_command())?;
+    match cmd {
+        Commands::Show => {
+            client::show()?;
+        }
+        Commands::Hide => {
+            client::hide()?;
+        }
+        Commands::Toggle => {
+            client::toggle()?;
+        }
+        Commands::Quit => {
+            client::quit()?;
+        }
+        Commands::Theme { action } => match action {
+            None => {
+                // No subcommand - show current theme
+                let theme = client::get_current_theme()?;
+                println!("Current theme: {}", theme);
+            }
+            Some(ThemeCommands::List) => {
+                let themes = client::list_themes()?;
+                println!("Available themes:");
+                for theme in themes {
+                    let source = if theme.is_bundled {
+                        "(bundled)"
+                    } else {
+                        "(user)"
+                    };
+                    println!("  {} {}", theme.name, source);
+                }
+            }
+            Some(ThemeCommands::Set { name }) => {
+                client::set_theme(&name)?;
+                println!("Theme set to '{}'", name);
+            }
+        },
+    }
+
     Ok(())
 }

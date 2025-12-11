@@ -1,4 +1,9 @@
-use crate::ipc::Command;
+//! Event types for daemon communication.
+
+use tokio::sync::oneshot;
+
+/// Response type for IPC operations.
+pub type IpcResponse = Result<(), String>;
 
 /// Events that the UI can send to the daemon.
 #[derive(Debug, Clone, Copy)]
@@ -8,18 +13,35 @@ pub enum WindowEvent {
 
 /// Unified event type for the daemon event loop.
 /// Combines IPC commands and window events into a single channel.
-#[derive(Debug, Clone)]
 pub enum DaemonEvent {
-    /// IPC command received from external client
-    Ipc(Command),
     /// Window event from the UI
     Window(WindowEvent),
-}
 
-impl From<Command> for DaemonEvent {
-    fn from(cmd: Command) -> Self {
-        Self::Ipc(cmd)
-    }
+    /// Show the launcher window
+    Show {
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
+
+    /// Hide the launcher window
+    Hide {
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
+
+    /// Toggle the launcher window visibility
+    Toggle {
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
+
+    /// Quit the daemon
+    Quit {
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
+
+    /// Set the active theme
+    SetTheme {
+        name: String,
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
 }
 
 impl From<WindowEvent> for DaemonEvent {

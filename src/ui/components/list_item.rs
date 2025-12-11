@@ -1,5 +1,5 @@
 use crate::ui::theme::theme;
-use gpui::{div, img, prelude::*, px, Div, ElementId, SharedString, Stateful};
+use gpui::{Div, ElementId, SharedString, Stateful, div, img, prelude::*, px};
 use std::path::PathBuf;
 
 /// A standard list item component with icon, title, description, and action indicator.
@@ -95,10 +95,7 @@ impl ListItemComponent {
         };
 
         let mut container = div()
-            .id(ElementId::NamedInteger(
-                "list-item".into(),
-                self.row as u64,
-            ))
+            .id(ElementId::NamedInteger("list-item".into(), self.row as u64))
             .mx(theme.item_margin_x)
             .my(theme.item_margin_y)
             .px(theme.item_padding_x)

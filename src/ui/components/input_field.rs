@@ -1,5 +1,5 @@
 use crate::ui::theme::theme;
-use gpui::{div, prelude::*, px, Div};
+use gpui::{Div, div, prelude::*, px};
 use gpui_component::input::Input;
 
 /// A styled input field component for search/query input.

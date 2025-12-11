@@ -2,7 +2,7 @@
 
 use crate::emoji::EmojiItem;
 use crate::ui::theme::theme;
-use gpui::{div, prelude::*, Div, ElementId, Stateful, SharedString};
+use gpui::{Div, ElementId, SharedString, Stateful, div, prelude::*};
 
 /// Render a single emoji cell in the grid.
 pub fn render_emoji_cell(emoji: &EmojiItem, selected: bool, index: usize) -> Stateful<Div> {

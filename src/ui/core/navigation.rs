@@ -1,6 +1,6 @@
 use gpui::{Context, ScrollStrategy, Window};
-use gpui_component::list::{ListDelegate, ListState};
 use gpui_component::IndexPath;
+use gpui_component::list::{ListDelegate, ListState};
 
 /// Navigation utilities for list-based views.
 ///

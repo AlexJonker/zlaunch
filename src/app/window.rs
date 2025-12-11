@@ -3,7 +3,7 @@ use crate::compositor::Compositor;
 use crate::items::{ApplicationItem, ListItem, WindowItem};
 use crate::ui::LauncherView;
 use gpui::{
-    App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
+    App, AppContext, Bounds, Entity, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
     WindowHandle, WindowKind, WindowOptions,
     layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions},
     point, px, size,
@@ -12,12 +12,18 @@ use gpui_component::Root;
 use std::sync::Arc;
 use tracing::warn;
 
+/// Handle to an open launcher window, containing both the window and view entity.
+pub struct LauncherWindow {
+    pub handle: WindowHandle<Root>,
+    pub launcher_view: Entity<LauncherView>,
+}
+
 pub fn create_and_show_window(
     applications: Vec<ApplicationItem>,
     compositor: Arc<dyn Compositor>,
     event_tx: DaemonEventSender,
     cx: &mut App,
-) -> anyhow::Result<WindowHandle<Root>> {
+) -> anyhow::Result<LauncherWindow> {
     // Fetch open windows from compositor
     let windows = fetch_windows(compositor.as_ref());
 
@@ -62,6 +68,10 @@ pub fn create_and_show_window(
         ..Default::default()
     };
 
+    // We need to capture the launcher view entity from inside the closure
+    let launcher_view_cell: std::cell::RefCell<Option<Entity<LauncherView>>> =
+        std::cell::RefCell::new(None);
+
     let window_handle = cx.open_window(options, |window, cx| {
         let on_hide = move || {
             let _ = event_tx.send(DaemonEvent::Window(WindowEvent::RequestHide));
@@ -73,6 +83,9 @@ pub fn create_and_show_window(
             launcher.focus(window, cx);
         });
 
+        // Store the view entity for later access
+        *launcher_view_cell.borrow_mut() = Some(view.clone());
+
         cx.new(|cx| Root::new(view, window, cx))
     })?;
 
@@ -80,7 +93,14 @@ pub fn create_and_show_window(
         window.activate_window();
     })?;
 
-    Ok(window_handle)
+    let launcher_view = launcher_view_cell
+        .into_inner()
+        .expect("Launcher view should have been created");
+
+    Ok(LauncherWindow {
+        handle: window_handle,
+        launcher_view,
+    })
 }
 
 pub fn close_window(handle: &WindowHandle<Root>, cx: &mut App) {

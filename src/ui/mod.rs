@@ -10,6 +10,6 @@ pub mod utils;
 pub mod views;
 
 // Re-export main types for convenience
-pub use launcher::{init, init as init_launcher, LauncherView, ViewMode};
-pub use theme::{theme, LauncherTheme};
+pub use launcher::{LauncherView, ViewMode, init, init as init_launcher};
+pub use theme::{LauncherTheme, theme};
 pub use views::AiResponseView;

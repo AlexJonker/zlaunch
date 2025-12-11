@@ -6,7 +6,9 @@
 //! - Reverting to previous theme on cancel
 //! - Persisting theme selection on confirm
 
-use crate::config::{list_all_themes_with_source, load_theme, save_theme_to_config};
+use crate::config::{
+    config_file_exists, list_all_themes_with_source, load_theme, save_theme_to_config,
+};
 use crate::items::ThemeItem;
 use crate::ui::delegates::ThemeListDelegate;
 use crate::ui::theme::LauncherTheme;
@@ -72,8 +74,10 @@ impl ThemeModeHandler {
         // Set up confirm callback (save theme and confirm)
         let on_confirm_clone = on_confirm.clone();
         delegate.set_on_confirm(move |theme_item| {
-            // Save to config if possible
-            if let Err(e) = save_theme_to_config(&theme_item.name) {
+            // Only persist if config file already exists
+            if config_file_exists()
+                && let Err(e) = save_theme_to_config(&theme_item.name)
+            {
                 tracing::warn!(%e, "Failed to save theme to config");
             }
             // Call confirm callback

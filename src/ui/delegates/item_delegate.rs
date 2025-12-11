@@ -1,14 +1,14 @@
 use crate::calculator::{evaluate_expression, looks_like_expression};
 use crate::items::{ActionItem, AiItem, CalculatorItem, ListItem, SearchItem, SubmenuItem};
-use crate::search::{detect_search, get_providers, SearchDetection};
-use crate::ui::theme::theme;
+use crate::search::{SearchDetection, detect_search, get_providers};
 use crate::ui::delegates::BaseDelegate;
+use crate::ui::theme::theme;
 use crate::ui::views::render_item;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use gpui::{div, prelude::*, App, Context, SharedString, Task, Window};
-use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use gpui::{App, Context, SharedString, Task, Window, div, prelude::*};
 use gpui_component::IndexPath;
+use gpui_component::list::{ListDelegate, ListItem as GpuiListItem, ListState};
 use std::sync::Arc;
 
 /// Section information for tracking item counts by type
@@ -65,7 +65,8 @@ impl ItemListDelegate {
             items.push(ListItem::Action(action));
         }
 
-        let section_info = Self::compute_section_info(&items, &(0..items.len()).collect::<Vec<_>>());
+        let section_info =
+            Self::compute_section_info(&items, &(0..items.len()).collect::<Vec<_>>());
 
         Self {
             base: BaseDelegate::new(items),
@@ -133,20 +134,21 @@ impl ItemListDelegate {
     fn process_query(&mut self, query: &str) {
         // Check for calculator expression
         if looks_like_expression(query)
-            && let Some(result) = evaluate_expression(query) {
-                self.calculator_item = Some(CalculatorItem::from_calc_result(result));
+            && let Some(result) = evaluate_expression(query)
+        {
+            self.calculator_item = Some(CalculatorItem::from_calc_result(result));
 
-                // When calculator matches, ONLY show calculator - no other items
-                self.ai_item = None;
-                self.search_items.clear();
-                // Clear base items by applying empty filtered indices
-                self.base.apply_filtered_indices(Vec::new());
-                self.update_section_info();
+            // When calculator matches, ONLY show calculator - no other items
+            self.ai_item = None;
+            self.search_items.clear();
+            // Clear base items by applying empty filtered indices
+            self.base.apply_filtered_indices(Vec::new());
+            self.update_section_info();
 
-                // Ensure calculator item is selected
-                self.base.set_selected_unchecked(0);
-                return;
-            }
+            // Ensure calculator item is selected
+            self.base.set_selected_unchecked(0);
+            return;
+        }
         self.calculator_item = None;
 
         // Filter the base items first
@@ -184,7 +186,8 @@ impl ItemListDelegate {
             self.ai_item = Some(AiItem::new(trimmed.to_string()));
             if let SearchDetection::Fallback { query } = search_detection {
                 for provider in get_providers() {
-                    self.search_items.push(SearchItem::new(provider, query.clone()));
+                    self.search_items
+                        .push(SearchItem::new(provider, query.clone()));
                 }
             }
         }
@@ -265,7 +268,8 @@ impl ItemListDelegate {
 
     /// Update section info after filtering
     fn update_section_info(&mut self) {
-        self.section_info = Self::compute_section_info(self.base.items(), self.base.filtered_indices());
+        self.section_info =
+            Self::compute_section_info(self.base.items(), self.base.filtered_indices());
         self.section_info.search_count = self.search_items.len();
     }
 
@@ -300,7 +304,11 @@ impl ItemListDelegate {
         let search_end = search_start + self.search_items.len();
         if global_index >= search_start && global_index < search_end {
             let search_idx = global_index - search_start;
-            return self.search_items.get(search_idx).cloned().map(ListItem::Search);
+            return self
+                .search_items
+                .get(search_idx)
+                .cloned()
+                .map(ListItem::Search);
         }
 
         None
@@ -506,7 +514,9 @@ impl ItemListDelegate {
             let search_and_ai_end = search_and_ai_start + ai_count + self.search_items.len();
 
             if global_idx >= search_and_ai_start && global_idx < search_and_ai_end {
-                return Some(IndexPath::new(global_idx - search_and_ai_start).section(current_section));
+                return Some(
+                    IndexPath::new(global_idx - search_and_ai_start).section(current_section),
+                );
             }
         }
 
@@ -521,7 +531,7 @@ enum SectionType {
     Windows,
     Commands,
     Applications,
-    SearchAndAi,  // Combined AI + Search section (no gap between them)
+    SearchAndAi, // Combined AI + Search section (no gap between them)
 }
 
 /// Implement ListDelegate trait for GPUI integration.
@@ -549,7 +559,7 @@ impl ListDelegate for ItemListDelegate {
             count += 1;
         }
         if has_search_and_ai {
-            count += 1;  // Combined AI + Search section
+            count += 1; // Combined AI + Search section
         }
 
         count
@@ -665,7 +675,9 @@ impl ListDelegate for ItemListDelegate {
         _window: &mut Window,
         _cx: &mut Context<ListState<Self>>,
     ) {
-        let global_idx = ix.map(|i| self.section_row_to_global(i.section, i.row)).unwrap_or(0);
+        let global_idx = ix
+            .map(|i| self.section_row_to_global(i.section, i.row))
+            .unwrap_or(0);
 
         // Use unchecked method to allow selection of dynamic items (AI, Search)
         // that are beyond the base filtered count

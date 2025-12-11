@@ -13,10 +13,7 @@ pub enum FileType {
 
 /// Determine the file type based on the file extension
 pub fn classify_file(path: &Path) -> FileType {
-    let extension = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("");
+    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
 
     if is_image_ext(extension) {
         FileType::Image
@@ -39,10 +36,34 @@ pub fn is_image_ext(ext: &str) -> bool {
 pub fn is_text_ext(ext: &str) -> bool {
     matches!(
         ext.to_lowercase().as_str(),
-        "txt" | "md" | "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "json"
-            | "yaml" | "yml" | "toml" | "html" | "css" | "sh" | "bash"
-            | "c" | "cpp" | "h" | "hpp" | "go" | "java" | "kt" | "swift"
-            | "xml" | "ini" | "conf" | "log"
+        "txt"
+            | "md"
+            | "rs"
+            | "py"
+            | "js"
+            | "ts"
+            | "tsx"
+            | "jsx"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "html"
+            | "css"
+            | "sh"
+            | "bash"
+            | "c"
+            | "cpp"
+            | "h"
+            | "hpp"
+            | "go"
+            | "java"
+            | "kt"
+            | "swift"
+            | "xml"
+            | "ini"
+            | "conf"
+            | "log"
     )
 }
 

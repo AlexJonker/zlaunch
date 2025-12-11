@@ -30,7 +30,10 @@ impl EmojiModeHandler {
         cx: &mut Context<T>,
     ) -> Self {
         // Create delegate with theme-based column count
-        let mut delegate = EmojiGridDelegate::new(all_emojis().to_vec(), crate::ui::theme::theme().emoji.columns);
+        let mut delegate = EmojiGridDelegate::new(
+            all_emojis().to_vec(),
+            crate::ui::theme::theme().emoji.columns,
+        );
 
         // Set up confirm callback (copy emoji and hide)
         delegate.set_on_confirm(move |emoji| {
@@ -67,13 +70,21 @@ impl EmojiModeHandler {
     }
 
     /// Update input placeholder when entering emoji mode.
-    pub fn setup_input(input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn setup_input(
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value("", window, cx);
         input_state.set_placeholder("Search emojis...", window, cx);
     }
 
     /// Restore input placeholder when exiting emoji mode.
-    pub fn restore_input(input_state: &mut InputState, window: &mut Window, cx: &mut Context<InputState>) {
+    pub fn restore_input(
+        input_state: &mut InputState,
+        window: &mut Window,
+        cx: &mut Context<InputState>,
+    ) {
         input_state.set_value("", window, cx);
         input_state.set_placeholder("Search applications...", window, cx);
     }

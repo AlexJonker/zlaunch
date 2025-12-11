@@ -172,6 +172,13 @@ impl LauncherView {
         }
     }
 
+    /// Refresh the current theme from the global state.
+    /// Called when the theme is changed via IPC while the window is open.
+    pub fn refresh_theme(&mut self, cx: &mut Context<Self>) {
+        self.current_theme = crate::ui::theme::theme();
+        cx.notify();
+    }
+
     /// Handle confirming an item.
     fn handle_item_confirm(item: &ListItem, compositor: &Arc<dyn Compositor>) {
         match item {
@@ -971,7 +978,6 @@ impl gpui::Render for LauncherView {
                     .border_1()
                     .border_color(theme.window_border)
                     .rounded(theme.window_border_radius)
-                    .shadow_lg()
                     .overflow_hidden()
                     // Stop click propagation to backdrop
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, _cx| {

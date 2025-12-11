@@ -6,7 +6,7 @@
 use crate::assets::PhosphorIcon;
 use crate::items::{DisplayItem, IconProvider, ListItem};
 use crate::ui::theme::theme;
-use gpui::{div, img, prelude::*, px, svg, Div, ElementId, SharedString, Stateful};
+use gpui::{Div, ElementId, SharedString, Stateful, div, img, prelude::*, px, svg};
 use std::path::PathBuf;
 
 /// Render any list item based on its type.
@@ -46,14 +46,14 @@ fn render_application(
 }
 
 /// Render a window item.
-fn render_window(
-    win: &crate::items::WindowItem,
-    selected: bool,
-    row: usize,
-) -> Stateful<Div> {
+fn render_window(win: &crate::items::WindowItem, selected: bool, row: usize) -> Stateful<Div> {
     let mut item = item_container(row, selected)
         .child(render_icon(win.icon_path.as_ref()))
-        .child(render_text_content(&win.title, Some(&win.description), selected));
+        .child(render_text_content(
+            &win.title,
+            Some(&win.description),
+            selected,
+        ));
 
     if selected {
         item = item.child(render_action_indicator("Switch"));
@@ -63,11 +63,7 @@ fn render_window(
 }
 
 /// Render an action item.
-fn render_action(
-    act: &crate::items::ActionItem,
-    selected: bool,
-    row: usize,
-) -> Stateful<Div> {
+fn render_action(act: &crate::items::ActionItem, selected: bool, row: usize) -> Stateful<Div> {
     let icon = act.icon_name().and_then(PhosphorIcon::from_name);
     let mut item = item_container(row, selected)
         .child(render_phosphor_icon(icon))
@@ -85,11 +81,7 @@ fn render_action(
 }
 
 /// Render a submenu item.
-fn render_submenu(
-    sub: &crate::items::SubmenuItem,
-    selected: bool,
-    row: usize,
-) -> Stateful<Div> {
+fn render_submenu(sub: &crate::items::SubmenuItem, selected: bool, row: usize) -> Stateful<Div> {
     let icon = sub.icon_name().and_then(PhosphorIcon::from_name);
     let mut item = item_container(row, selected)
         .child(render_phosphor_icon(icon))
@@ -186,10 +178,7 @@ fn render_calculator_icon() -> Div {
 }
 
 /// Render the calculator text content (expression + result).
-fn render_calculator_content(
-    calc: &crate::items::CalculatorItem,
-    selected: bool,
-) -> Div {
+fn render_calculator_content(calc: &crate::items::CalculatorItem, selected: bool) -> Div {
     let theme = theme();
 
     // Expression as muted smaller text
@@ -239,11 +228,7 @@ fn render_calculator_content(
 }
 
 /// Render a search item.
-fn render_search(
-    search: &crate::items::SearchItem,
-    selected: bool,
-    row: usize,
-) -> Stateful<Div> {
+fn render_search(search: &crate::items::SearchItem, selected: bool, row: usize) -> Stateful<Div> {
     let mut item = item_container(row, selected)
         .child(render_phosphor_icon(Some(search.icon())))
         .child(render_text_content(&search.name, None, selected));

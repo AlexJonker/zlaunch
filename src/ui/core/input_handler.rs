@@ -28,11 +28,7 @@ impl<V: 'static> InputHandler<V> {
     ///
     /// The callback receives the view, the input text, and the context.
     /// Window access is available through context methods if needed.
-    pub fn subscribe<F>(
-        &mut self,
-        cx: &mut Context<V>,
-        mut on_change: F,
-    ) -> &mut Self
+    pub fn subscribe<F>(&mut self, cx: &mut Context<V>, mut on_change: F) -> &mut Self
     where
         F: FnMut(&mut V, String, &mut Context<V>) + 'static,
     {
