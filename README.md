@@ -9,9 +9,13 @@ A fast application launcher and window switcher for Linux Wayland, built with
 
 **[Website](https://zlaunch.zortax.de)** &middot; **[Documentation](https://zlaunch.zortax.de/docs)**
 
+---
+
 <p align="center">
 <img src="https://zlaunch.zortax.de/img/hero.webp" alt="zlaunch screenshot" width="80%">
 </p>
+
+---
 
 <details>
 <summary>Demo video</summary>
